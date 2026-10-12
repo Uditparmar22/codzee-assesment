@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { NotFoundError, ValidationError } from '../../lib/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors.js';
 import { parse, parseId } from '../../lib/validation.js';
-import { ProjectModel } from '../projects/project.model.js';
+import { currentUser } from '../../middleware/authenticate.js';
+import { canEditTask, canManageProject } from '../auth/policies.js';
+import { ProjectModel, type ProjectDocument } from '../projects/project.model.js';
 import { UserModel } from '../users/user.model.js';
-import { TaskModel } from './task.model.js';
+import { TaskModel, type TaskDocument } from './task.model.js';
 import { createTaskSchema, listTasksQuerySchema, updateTaskSchema } from './task.schemas.js';
 
 async function assertAssigneeExists(assigneeId: string | null | undefined): Promise<void> {
@@ -14,27 +16,38 @@ async function assertAssigneeExists(assigneeId: string | null | undefined): Prom
   }
 }
 
+async function findProjectOrThrow(id: string): Promise<ProjectDocument> {
+  const project = await ProjectModel.findById(id);
+  if (!project) throw new NotFoundError('Project', id);
+  return project;
+}
+
+async function findTaskOrThrow(id: string): Promise<TaskDocument> {
+  const task = await TaskModel.findById(id);
+  if (!task) throw new NotFoundError('Task', id);
+  return task;
+}
+
 /** Routes nested under a project: /projects/:projectId/tasks */
 export function projectTaskRoutes(): Router {
   const router = Router({ mergeParams: true });
 
-  const requireProject = async (raw: unknown): Promise<string> => {
-    const projectId = parseId(raw, 'projectId');
-    if (!(await ProjectModel.exists({ _id: projectId }))) throw new NotFoundError('Project', projectId);
-    return projectId;
-  };
+  const projectIdFrom = (params: unknown) =>
+    parseId((params as Record<string, string>).projectId, 'projectId');
 
   router.get('/', async (req, res) => {
-    const projectId = await requireProject((req.params as Record<string, string>).projectId);
+    const project = await findProjectOrThrow(projectIdFrom(req.params));
     const query = parse(listTasksQuerySchema, req.query);
-    res.json({ data: await TaskModel.find({ projectId, ...query }).sort({ _id: 1 }) });
+    res.json({ data: await TaskModel.find({ projectId: project._id, ...query }).sort({ _id: 1 }) });
   });
 
   router.post('/', async (req, res) => {
-    const projectId = await requireProject((req.params as Record<string, string>).projectId);
+    const project = await findProjectOrThrow(projectIdFrom(req.params));
+    if (!canManageProject(currentUser(req), project)) throw new ForbiddenError();
+
     const input = parse(createTaskSchema, req.body);
     await assertAssigneeExists(input.assigneeId);
-    res.status(201).json(await TaskModel.create({ ...input, projectId }));
+    res.status(201).json(await TaskModel.create({ ...input, projectId: project._id }));
   });
 
   return router;
@@ -45,23 +58,19 @@ export function taskRoutes(): Router {
   const router = Router();
 
   router.get('/:id', async (req, res) => {
-    const id = parseId(req.params.id);
-    const task = await TaskModel.findById(id);
-    if (!task) throw new NotFoundError('Task', id);
-    res.json(task);
+    res.json(await findTaskOrThrow(parseId(req.params.id)));
   });
 
   router.patch('/:id', async (req, res) => {
     const id = parseId(req.params.id);
     const input = parse(updateTaskSchema, req.body);
+    const task = await findTaskOrThrow(id);
+    const project = await findProjectOrThrow(task.projectId.toString());
+    if (!canEditTask(currentUser(req), task, project)) throw new ForbiddenError();
+
     await assertAssigneeExists(input.assigneeId);
-    const task = await TaskModel.findByIdAndUpdate(
-      id,
-      { $set: input },
-      { returnDocument: 'after', runValidators: true },
-    );
-    if (!task) throw new NotFoundError('Task', id);
-    res.json(task);
+    task.set(input);
+    res.json(await task.save());
   });
 
   router.delete('/:id', async (req, res) => {

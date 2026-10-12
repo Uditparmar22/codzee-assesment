@@ -31,23 +31,50 @@ npm run dev        # http://localhost:3000, indexes are synced on startup
 | `MONGODB_URI`   | `mongodb://127.0.0.1:27017/task-tracker` | MongoDB connection string |
 | `LOG_LEVEL`     | `info`               | `debug` \| `info` \| `warn` \| `error` \| `silent` |
 | `NODE_ENV`      | `development`        | `development` \| `test` \| `production`          |
+| `JWT_SECRET`    | `dev-secret-change-me` | HMAC secret used to sign access tokens         |
+| `JWT_EXPIRES_IN_SECONDS` | `3600`      | Access token lifetime                            |
 
 ## API
 
 All request and response bodies are JSON. Fields use `camelCase`, ids are 24-character hex ObjectIds, and timestamps are ISO-8601 UTC.
 
+### Authentication
+
+Register or log in to receive a JWT, then send it on every other request:
+
+```
+Authorization: Bearer <token>
+```
+
+| Method | Path             | Description                                   |
+| ------ | ---------------- | --------------------------------------------- |
+| POST   | `/auth/register` | Create an account (`email`, `name`, `password`) → `{ user, token, expiresIn }` |
+| POST   | `/auth/login`    | Exchange credentials for a token              |
+
+Passwords are hashed with scrypt and a per-user random salt, and the hash is never returned by the API.
+
+#### Authorization rules
+
+| Action                               | Allowed for                            |
+| ------------------------------------ | -------------------------------------- |
+| Read users, projects, tasks          | Any authenticated user                 |
+| Create a project                     | Any authenticated user (becomes owner) |
+| Update / delete a project            | Project owner, admin                   |
+| Create / delete tasks in a project   | Project owner, admin                   |
+| Update a task                        | Project owner, admin, task assignee    |
+
 ### Users
 
-| Method | Path         | Description   |
-| ------ | ------------ | ------------- |
-| POST   | `/users`     | Create a user |
-| GET    | `/users/:id` | Get a user    |
+| Method | Path         | Description            |
+| ------ | ------------ | ---------------------- |
+| GET    | `/users/me`  | The authenticated user |
+| GET    | `/users/:id` | Get a user             |
 
 ### Projects
 
 | Method | Path            | Description                                     |
 | ------ | --------------- | ----------------------------------------------- |
-| POST   | `/projects`     | Create a project (`name`, `description?`, `ownerId`) |
+| POST   | `/projects`     | Create a project (`name`, `description?`) owned by the caller |
 | GET    | `/projects`     | List projects (filter: `?ownerId=`)             |
 | GET    | `/projects/:id` | Get a project                                   |
 | PATCH  | `/projects/:id` | Update `name` / `description`                   |
@@ -68,14 +95,15 @@ Task fields: `title`, `description`, `status` (`todo` \| `in_progress` \| `done`
 ### Example
 
 ```bash
-USER_ID=$(curl -s -X POST localhost:3000/users -H 'content-type: application/json' \
-  -d '{"email":"ada@example.com","name":"Ada"}' | jq -r .id)
+TOKEN=$(curl -s -X POST localhost:3000/auth/register -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com","name":"Ada","password":"correct horse battery"}' | jq -r .token)
+AUTH="authorization: Bearer $TOKEN"
 
-PROJECT_ID=$(curl -s -X POST localhost:3000/projects -H 'content-type: application/json' \
-  -d "{\"name\":\"Apollo\",\"ownerId\":\"$USER_ID\"}" | jq -r .id)
+PROJECT_ID=$(curl -s -X POST localhost:3000/projects -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"name":"Apollo"}' | jq -r .id)
 
-curl -X POST localhost:3000/projects/$PROJECT_ID/tasks -H 'content-type: application/json' \
-  -d "{\"title\":\"Design the lander\",\"priority\":\"high\",\"assigneeId\":\"$USER_ID\",\"dueDate\":\"2026-12-01\"}"
+curl -X POST localhost:3000/projects/$PROJECT_ID/tasks -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"title":"Design the lander","priority":"high","dueDate":"2026-12-01"}'
 ```
 
 ### Errors
@@ -90,6 +118,8 @@ Errors share one shape:
 | ------ | ------------------ | -------------------------------------- |
 | 400    | `VALIDATION_ERROR` | Invalid body, query or path parameter  |
 | 400    | `INVALID_JSON`     | Malformed JSON body                    |
+| 401    | `UNAUTHORIZED`     | Missing, invalid or expired token; bad credentials |
+| 403    | `FORBIDDEN`        | Authenticated but not allowed          |
 | 404    | `NOT_FOUND`        | Resource or route does not exist       |
 | 409    | `CONFLICT`         | Unique index violation (e.g. duplicate email) |
 | 500    | `INTERNAL_ERROR`   | Unexpected failure (details are logged, not returned) |
@@ -110,7 +140,6 @@ tests/                 API tests against mongodb-memory-server
 
 ## Roadmap
 
-- Authentication and per-user authorization
 - Pagination for list endpoints
 - Outgoing webhooks for task events
 - Transactions for multi-document writes (requires a replica set)

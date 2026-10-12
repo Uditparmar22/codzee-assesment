@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { connectDatabase, disconnectDatabase } from './db/connection.js';
 import { createLogger } from './lib/logger.js';
+import { createTokenService } from './modules/auth/tokens.js';
 
 const config = loadConfig();
 const logger = createLogger(config.LOG_LEVEL);
@@ -9,7 +10,9 @@ const logger = createLogger(config.LOG_LEVEL);
 await connectDatabase(config.MONGODB_URI);
 logger.info('Connected to MongoDB');
 
-const server = createApp({ logger }).listen(config.PORT, () => {
+const tokens = createTokenService(config.JWT_SECRET, config.JWT_EXPIRES_IN_SECONDS);
+
+const server = createApp({ tokens, logger }).listen(config.PORT, () => {
   logger.info('Server listening', { port: config.PORT, env: config.NODE_ENV });
 });
 

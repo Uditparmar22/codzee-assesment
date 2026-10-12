@@ -5,6 +5,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   MONGODB_URI: z.string().min(1).default('mongodb://127.0.0.1:27017/task-tracker'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
+  JWT_SECRET: z.string().min(1).default('dev-secret-change-me'),
+  JWT_EXPIRES_IN_SECONDS: z.coerce.number().int().positive().default(3600),
 });
 
 export type Config = z.infer<typeof envSchema>;
