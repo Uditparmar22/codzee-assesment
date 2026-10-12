@@ -1,18 +1,17 @@
 import { Router } from 'express';
-import { ConflictError, NotFoundError } from '../../lib/errors.js';
-import { parse, parseId } from '../../lib/validation.js';
+import { NotFoundError } from '../../lib/errors.js';
+import { parseId } from '../../lib/validation.js';
+import { currentUser } from '../../middleware/authenticate.js';
 import { UserModel } from './user.model.js';
-import { createUserSchema } from './user.schemas.js';
 
 export function userRoutes(): Router {
   const router = Router();
 
-  router.post('/', async (req, res) => {
-    const input = parse(createUserSchema, req.body);
-    if (await UserModel.exists({ email: input.email.toLowerCase() })) {
-      throw new ConflictError(`A user with email ${input.email} already exists`);
-    }
-    res.status(201).json(await UserModel.create(input));
+  router.get('/me', async (req, res) => {
+    const { id } = currentUser(req);
+    const user = await UserModel.findById(id);
+    if (!user) throw new NotFoundError('User', id);
+    res.json(user);
   });
 
   router.get('/:id', async (req, res) => {

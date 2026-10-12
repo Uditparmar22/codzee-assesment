@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { MISSING_ID, api, createProject, createUser } from './helpers.js';
+import { MISSING_ID, as, api as anonymous, createAdmin, createProject, createUser, type TestUser } from './helpers.js';
 
 describe('tasks API', () => {
+  let owner: TestUser;
   let ownerId: string;
   let projectId: string;
+  let api: ReturnType<typeof as>;
 
   beforeEach(async () => {
-    ownerId = (await createUser()).id;
-    projectId = (await createProject(ownerId)).id;
+    owner = await createUser('Owner');
+    ownerId = owner.id;
+    projectId = (await createProject(owner)).id;
+    api = as(owner);
   });
 
   it('creates a task with defaults', async () => {
@@ -89,8 +93,36 @@ describe('tasks API', () => {
     await api.delete(`/tasks/${created.body.id}`).expect(404);
   });
 
+  describe('authorization', () => {
+    it('only lets the project owner create tasks', async () => {
+      const stranger = await createUser('Stranger');
+      await as(stranger).post(`/projects/${projectId}/tasks`).send({ title: 'Nope' }).expect(403);
+    });
+
+    it('only lets the project owner or an admin delete a task', async () => {
+      const assignee = await createUser('Assignee');
+      const stranger = await createUser('Stranger');
+      const task = await api.post(`/projects/${projectId}/tasks`).send({ title: 'Keep me', assigneeId: assignee.id });
+
+      await as(stranger).delete(`/tasks/${task.body.id}`).expect(403);
+      await as(assignee).delete(`/tasks/${task.body.id}`).expect(403);
+      await api.get(`/tasks/${task.body.id}`).expect(200);
+
+      await as(await createAdmin()).delete(`/tasks/${task.body.id}`).expect(204);
+    });
+
+    it('lets the assignee update their task but not a stranger', async () => {
+      const assignee = await createUser('Assignee');
+      const stranger = await createUser('Stranger');
+      const task = await api.post(`/projects/${projectId}/tasks`).send({ title: 'Mine', assigneeId: assignee.id });
+
+      await as(assignee).patch(`/tasks/${task.body.id}`).send({ status: 'done' }).expect(200);
+      await as(stranger).patch(`/tasks/${task.body.id}`).send({ status: 'todo' }).expect(403);
+    });
+  });
+
   it('returns 404 for unknown routes', async () => {
-    const res = await api.get('/nope');
+    const res = await anonymous.get('/nope');
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
   });

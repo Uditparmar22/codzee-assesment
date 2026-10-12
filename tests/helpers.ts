@@ -1,22 +1,62 @@
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { createTokenService } from '../src/modules/auth/tokens.js';
+import { UserModel } from '../src/modules/users/user.model.js';
 
-export const api = request(createApp());
+export const TEST_SECRET = 'test-secret';
+export const tokens = createTokenService(TEST_SECRET, 3600);
+export const api = request(createApp({ tokens }));
 
 /** A well-formed ObjectId that will never match a document. */
 export const MISSING_ID = '000000000000000000000000';
 
-let emailCounter = 0;
+export const TEST_PASSWORD = 'correct horse battery';
 
-export async function createUser(name = 'Ada Lovelace') {
-  emailCounter += 1;
-  const res = await api.post('/users').send({ email: `user${emailCounter}@example.com`, name });
-  if (res.status !== 201) throw new Error(`createUser failed: ${res.status} ${JSON.stringify(res.body)}`);
-  return res.body as { id: string; email: string; name: string };
+export interface TestUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'member';
+  token: string;
 }
 
-export async function createProject(ownerId: string, name = 'Apollo') {
-  const res = await api.post('/projects').send({ name, ownerId });
+/** Returns request builders that send the given user's bearer token. */
+export function as(user: Pick<TestUser, 'token'>) {
+  const auth = { Authorization: `Bearer ${user.token}` };
+  return {
+    get: (url: string) => api.get(url).set(auth),
+    post: (url: string) => api.post(url).set(auth),
+    patch: (url: string) => api.patch(url).set(auth),
+    delete: (url: string) => api.delete(url).set(auth),
+  };
+}
+
+let emailCounter = 0;
+
+export async function createUser(name = 'Ada Lovelace'): Promise<TestUser> {
+  emailCounter += 1;
+  const res = await api
+    .post('/auth/register')
+    .send({ email: `user${emailCounter}@example.com`, name, password: TEST_PASSWORD });
+  if (res.status !== 201) throw new Error(`createUser failed: ${res.status} ${JSON.stringify(res.body)}`);
+  return { ...res.body.user, token: res.body.token };
+}
+
+/** Creates an admin directly in the database (admins are provisioned, not self-registered). */
+export async function createAdmin(): Promise<TestUser> {
+  emailCounter += 1;
+  const user = await UserModel.create({ email: `admin${emailCounter}@example.com`, name: 'Admin', role: 'admin' });
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: 'admin',
+    token: tokens.sign({ id: user.id, role: 'admin' }).token,
+  };
+}
+
+export async function createProject(owner: TestUser, name = 'Apollo') {
+  const res = await as(owner).post('/projects').send({ name });
   if (res.status !== 201) throw new Error(`createProject failed: ${res.status} ${JSON.stringify(res.body)}`);
   return res.body as { id: string; name: string; ownerId: string };
 }
