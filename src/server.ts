@@ -1,0 +1,27 @@
+import { createApp } from './app.js';
+import { loadConfig } from './config.js';
+import { connectDatabase, disconnectDatabase } from './db/connection.js';
+import { createLogger } from './lib/logger.js';
+
+const config = loadConfig();
+const logger = createLogger(config.LOG_LEVEL);
+
+await connectDatabase(config.MONGODB_URI);
+logger.info('Connected to MongoDB');
+
+const server = createApp({ logger }).listen(config.PORT, () => {
+  logger.info('Server listening', { port: config.PORT, env: config.NODE_ENV });
+});
+
+function shutdown(signal: string): void {
+  logger.info('Shutting down', { signal });
+  server.close(async () => {
+    await disconnectDatabase();
+    process.exit(0);
+  });
+  // Force exit if open connections keep the server alive.
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
