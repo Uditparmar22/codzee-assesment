@@ -1,7 +1,8 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import { z } from 'zod';
 import { ForbiddenError, NotFoundError } from '../../lib/errors.js';
-import { paginationQuery, toPage } from '../../lib/pagination.js';
+import { decodeCursor, paginationQuery, toPage } from '../../lib/pagination.js';
 import { objectId, parse, parseId } from '../../lib/validation.js';
 import { currentUser } from '../../middleware/authenticate.js';
 import { canManageProject } from '../auth/policies.js';
@@ -11,6 +12,7 @@ import { ProjectModel, type ProjectDocument } from './project.model.js';
 import { createProjectSchema, updateProjectSchema } from './project.schemas.js';
 
 const listQuerySchema = paginationQuery.extend({ ownerId: objectId.optional() });
+const projectCursor = z.object({ id: objectId });
 
 export interface ProjectStats {
   total: number;
@@ -38,22 +40,25 @@ export function projectRoutes(): Router {
     const { ownerId, cursor, limit } = parse(listQuerySchema, req.query);
     const filter = {
       ...(ownerId && { ownerId }),
-      ...(cursor && { _id: { $gt: cursor } }),
+      ...(cursor && { _id: { $gt: decodeCursor(cursor, projectCursor).id } }),
     };
     const docs = await ProjectModel.find(filter).sort({ _id: 1 }).limit(limit + 1);
-    res.json(toPage(docs, limit));
+    res.json(toPage(docs, limit, (last) => ({ id: last.id })));
   });
 
   router.get('/:id/stats', async (req, res) => {
     const id = parseId(req.params.id);
     await findProjectOrThrow(id);
+    const startOfTodayUtc = new Date(new Date().setUTCHours(0, 0, 0, 0));
 
     const [counts, overdue] = await Promise.all([
+      // Aggregation pipelines bypass Mongoose casting, so the id must be an ObjectId here.
       TaskModel.aggregate<{ _id: TaskStatus; count: number }>([
-        { $match: { projectId: id } },
+        { $match: { projectId: new Types.ObjectId(id) } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
-      TaskModel.countDocuments({ projectId: id, status: { $ne: 'done' }, dueDate: { $lt: new Date() } }),
+      // Due dates are calendar days stored as midnight UTC: a task is overdue once its day has passed.
+      TaskModel.countDocuments({ projectId: id, status: { $ne: 'done' }, dueDate: { $lt: startOfTodayUtc } }),
     ]);
 
     const byStatus = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<TaskStatus, number>;

@@ -98,18 +98,20 @@ Task fields: `title`, `description`, `status` (`todo` \| `in_progress` \| `done`
 | Param        | Description                                                  |
 | ------------ | ------------------------------------------------------------ |
 | `status`, `priority`, `assigneeId` | Exact-match filters                    |
-| `q`          | Case-insensitive search in the title                         |
+| `q`          | Case-insensitive search in the title (matched literally, not as a regex) |
 | `sort`       | `createdAt` (default) or `dueDate`                           |
 | `include`    | `assignee` embeds `{ id, name, email }` of the assignee      |
 | `limit`, `cursor` | Pagination (below)                                      |
 
 ### Pagination
 
-List endpoints use cursor pagination. Pass `limit` (default 20) and, for the next page, the `cursor` returned by the previous one:
+List endpoints use cursor pagination. Pass `limit` (default 20, max 100) and, for the next page, the `cursor` returned by the previous one:
 
 ```json
-{ "data": [ ... ], "page": { "limit": 20, "nextCursor": "6acc95402c431784481472b9" } }
+{ "data": [ ... ], "page": { "limit": 20, "nextCursor": "eyJpZCI6IjZhY2M5NTQw..." } }
 ```
+
+Cursors are opaque: they encode the position in the current sort order, so use them only with the same query parameters.
 
 `nextCursor` is `null` on the last page.
 
