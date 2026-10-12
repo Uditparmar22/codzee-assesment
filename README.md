@@ -103,6 +103,27 @@ Task fields: `title`, `description`, `status` (`todo` \| `in_progress` \| `done`
 | `include`    | `assignee` embeds `{ id, name, email }` of the assignee      |
 | `limit`, `cursor` | Pagination (below)                                      |
 
+### Webhooks
+
+Project owners can register HTTPS endpoints that receive task events.
+
+| Method | Path                                                 | Description                              |
+| ------ | ---------------------------------------------------- | ---------------------------------------- |
+| POST   | `/projects/:projectId/webhooks`                      | Register (`url`, `events?`) → includes the signing `secret` |
+| GET    | `/projects/:projectId/webhooks`                      | List webhooks                            |
+| DELETE | `/projects/:projectId/webhooks/:webhookId`           | Remove a webhook                         |
+| GET    | `/projects/:projectId/webhooks/:webhookId/deliveries`| Last 50 delivery attempts                |
+
+Events: `task.created`, `task.updated`, `task.deleted` (all by default). Each delivery is a `POST` with a JSON body:
+
+```json
+{ "id": "<delivery id>", "event": "task.created", "createdAt": "2026-10-12T09:00:00.000Z", "data": { ...task } }
+```
+
+and headers `X-Webhook-Event`, `X-Webhook-Delivery` and `X-Webhook-Signature: sha256=<hex>`. The signature is an HMAC-SHA256 of the raw request body using the webhook's secret; receivers should verify it with a constant-time comparison before trusting the payload.
+
+Non-2xx responses and network errors are retried after 1s, 10s and 60s; the outcome of each delivery is recorded and visible in the deliveries endpoint.
+
 ### Pagination
 
 List endpoints use cursor pagination. Pass `limit` (default 20, max 100) and, for the next page, the `cursor` returned by the previous one:
@@ -163,7 +184,7 @@ tests/                 API tests against mongodb-memory-server
 
 ## Roadmap
 
-- Outgoing webhooks for task events
+- Durable webhook queue (deliveries currently run in-process)
 - Transactions for multi-document writes (requires a replica set)
 
 ## License
