@@ -17,6 +17,8 @@ const taskSchema = new Schema(
 
 // Supports the project task list, which filters by project and optionally status.
 taskSchema.index({ projectId: 1, status: 1 });
+// Supports `sort=dueDate` on the project task list and the overdue count in project stats.
+taskSchema.index({ projectId: 1, dueDate: 1, _id: 1 });
 
 export type Task = InferSchemaType<typeof taskSchema>;
 export type TaskDocument = HydratedDocument<Task>;

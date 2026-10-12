@@ -75,22 +75,43 @@ Passwords are hashed with scrypt and a per-user random salt, and the hash is nev
 | Method | Path            | Description                                     |
 | ------ | --------------- | ----------------------------------------------- |
 | POST   | `/projects`     | Create a project (`name`, `description?`) owned by the caller |
-| GET    | `/projects`     | List projects (filter: `?ownerId=`)             |
+| GET    | `/projects`     | List projects (filter: `?ownerId=`; paginated)  |
 | GET    | `/projects/:id` | Get a project                                   |
 | PATCH  | `/projects/:id` | Update `name` / `description`                   |
 | DELETE | `/projects/:id` | Delete a project and its tasks                  |
+| GET    | `/projects/:id/stats` | Task counts: `total`, `byStatus`, `overdue` |
 
 ### Tasks
 
 | Method | Path                           | Description                                              |
 | ------ | ------------------------------ | -------------------------------------------------------- |
 | POST   | `/projects/:projectId/tasks`   | Create a task                                            |
-| GET    | `/projects/:projectId/tasks`   | List tasks (filters: `?status=`, `?priority=`, `?assigneeId=`) |
+| GET    | `/projects/:projectId/tasks`   | List tasks (see query params below; paginated)           |
 | GET    | `/tasks/:id`                   | Get a task                                               |
 | PATCH  | `/tasks/:id`                   | Partially update a task                                  |
 | DELETE | `/tasks/:id`                   | Delete a task                                            |
 
 Task fields: `title`, `description`, `status` (`todo` \| `in_progress` \| `done`), `priority` (`low` \| `medium` \| `high`), `assigneeId`, `dueDate` (send `YYYY-MM-DD`; returned as midnight UTC).
+
+#### Listing tasks
+
+| Param        | Description                                                  |
+| ------------ | ------------------------------------------------------------ |
+| `status`, `priority`, `assigneeId` | Exact-match filters                    |
+| `q`          | Case-insensitive search in the title                         |
+| `sort`       | `createdAt` (default) or `dueDate`                           |
+| `include`    | `assignee` embeds `{ id, name, email }` of the assignee      |
+| `limit`, `cursor` | Pagination (below)                                      |
+
+### Pagination
+
+List endpoints use cursor pagination. Pass `limit` (default 20) and, for the next page, the `cursor` returned by the previous one:
+
+```json
+{ "data": [ ... ], "page": { "limit": 20, "nextCursor": "6acc95402c431784481472b9" } }
+```
+
+`nextCursor` is `null` on the last page.
 
 ### Example
 
@@ -140,7 +161,6 @@ tests/                 API tests against mongodb-memory-server
 
 ## Roadmap
 
-- Pagination for list endpoints
 - Outgoing webhooks for task events
 - Transactions for multi-document writes (requires a replica set)
 

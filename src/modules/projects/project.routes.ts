@@ -1,14 +1,23 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { ForbiddenError, NotFoundError } from '../../lib/errors.js';
+import { paginationQuery, toPage } from '../../lib/pagination.js';
 import { objectId, parse, parseId } from '../../lib/validation.js';
 import { currentUser } from '../../middleware/authenticate.js';
 import { canManageProject } from '../auth/policies.js';
 import { TaskModel } from '../tasks/task.model.js';
+import { TASK_STATUSES, type TaskStatus } from '../tasks/task.schemas.js';
 import { ProjectModel, type ProjectDocument } from './project.model.js';
 import { createProjectSchema, updateProjectSchema } from './project.schemas.js';
 
-const listQuerySchema = z.object({ ownerId: objectId.optional() });
+const listQuerySchema = paginationQuery.extend({ ownerId: objectId.optional() });
+
+export interface ProjectStats {
+  total: number;
+  byStatus: Record<TaskStatus, number>;
+  /** Tasks not yet done whose due date has passed. */
+  overdue: number;
+}
 
 async function findProjectOrThrow(id: string): Promise<ProjectDocument> {
   const project = await ProjectModel.findById(id);
@@ -26,9 +35,36 @@ export function projectRoutes(): Router {
   });
 
   router.get('/', async (req, res) => {
-    const query = parse(listQuerySchema, req.query);
-    const filter = query.ownerId ? { ownerId: query.ownerId } : {};
-    res.json({ data: await ProjectModel.find(filter).sort({ _id: 1 }) });
+    const { ownerId, cursor, limit } = parse(listQuerySchema, req.query);
+    const filter = {
+      ...(ownerId && { ownerId }),
+      ...(cursor && { _id: { $gt: cursor } }),
+    };
+    const docs = await ProjectModel.find(filter).sort({ _id: 1 }).limit(limit + 1);
+    res.json(toPage(docs, limit));
+  });
+
+  router.get('/:id/stats', async (req, res) => {
+    const id = parseId(req.params.id);
+    await findProjectOrThrow(id);
+
+    const [counts, overdue] = await Promise.all([
+      TaskModel.aggregate<{ _id: TaskStatus; count: number }>([
+        { $match: { projectId: id } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      TaskModel.countDocuments({ projectId: id, status: { $ne: 'done' }, dueDate: { $lt: new Date() } }),
+    ]);
+
+    const byStatus = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<TaskStatus, number>;
+    for (const { _id, count } of counts) byStatus[_id] = count;
+
+    const stats: ProjectStats = {
+      total: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
+      byStatus,
+      overdue,
+    };
+    res.json(stats);
   });
 
   router.get('/:id', async (req, res) => {
