@@ -33,11 +33,22 @@ const fakeFetch: typeof fetch = async (input, init) => {
 
 export const TEST_SECRET = 'test-secret';
 export const tokens = createTokenService(TEST_SECRET, 3600);
+/** Every test hostname resolves to a public documentation address unless a test overrides it. */
+export const dns = {
+  lookup: async (_hostname: string): Promise<string[]> => ['93.184.216.34'],
+  reset() {
+    this.lookup = async () => ['93.184.216.34'];
+  },
+};
+
 export const webhooks = createWebhookDispatcher({
   logger: createLogger('silent'),
   fetch: fakeFetch,
+  lookup: (hostname) => dns.lookup(hostname),
   retryDelaysMs: [0, 0],
 });
+
+export { fakeFetch };
 export const api = request(createApp({ tokens, webhooks }));
 
 /** A well-formed ObjectId that will never match a document. */

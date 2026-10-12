@@ -105,12 +105,12 @@ Task fields: `title`, `description`, `status` (`todo` \| `in_progress` \| `done`
 
 ### Webhooks
 
-Project owners can register HTTPS endpoints that receive task events.
+Project owners (and admins) can register HTTPS endpoints that receive task events. All webhook routes require the project owner or an admin.
 
 | Method | Path                                                 | Description                              |
 | ------ | ---------------------------------------------------- | ---------------------------------------- |
-| POST   | `/projects/:projectId/webhooks`                      | Register (`url`, `events?`) → includes the signing `secret` |
-| GET    | `/projects/:projectId/webhooks`                      | List webhooks                            |
+| POST   | `/projects/:projectId/webhooks`                      | Register (`url`, `events?`) → includes the signing `secret`, shown only this once |
+| GET    | `/projects/:projectId/webhooks`                      | List webhooks (without secrets)          |
 | DELETE | `/projects/:projectId/webhooks/:webhookId`           | Remove a webhook                         |
 | GET    | `/projects/:projectId/webhooks/:webhookId/deliveries`| Last 50 delivery attempts                |
 
@@ -122,7 +122,9 @@ Events: `task.created`, `task.updated`, `task.deleted` (all by default). Each de
 
 and headers `X-Webhook-Event`, `X-Webhook-Delivery` and `X-Webhook-Signature: sha256=<hex>`. The signature is an HMAC-SHA256 of the raw request body using the webhook's secret; receivers should verify it with a constant-time comparison before trusting the payload.
 
-Non-2xx responses and network errors are retried after 1s, 10s and 60s; the outcome of each delivery is recorded and visible in the deliveries endpoint.
+Non-2xx responses (including redirects, which are not followed), network errors and timeouts (5s per attempt) are retried after 1s, 10s and 60s. The outcome of each delivery is recorded and visible in the deliveries endpoint; retries still pending when the server shuts down are recorded as failed.
+
+Webhook URLs must use `https` and may not point to private, loopback, link-local or other internal addresses. This is checked when the webhook is registered and again, after DNS resolution, before every delivery.
 
 ### Pagination
 

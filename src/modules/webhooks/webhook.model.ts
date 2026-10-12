@@ -1,5 +1,5 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
-import { toJSONOptions } from '../../db/json.js';
+import { toJSONHiding, toJSONOptions } from '../../db/json.js';
 import { WEBHOOK_EVENTS } from './webhook.schemas.js';
 
 const webhookSchema = new Schema(
@@ -11,7 +11,8 @@ const webhookSchema = new Schema(
     secret: { type: String, required: true },
     active: { type: Boolean, default: true },
   },
-  { timestamps: true, toJSON: toJSONOptions },
+  // The secret is shown once, in the registration response, and never again.
+  { timestamps: true, toJSON: toJSONHiding('secret') },
 );
 
 export type Webhook = InferSchemaType<typeof webhookSchema>;

@@ -22,7 +22,7 @@ const server = createApp({ tokens, webhooks, logger }).listen(config.PORT, () =>
 function shutdown(signal: string): void {
   logger.info('Shutting down', { signal });
   server.close(async () => {
-    await webhooks.idle();
+    await webhooks.shutdown();
     await disconnectDatabase();
     process.exit(0);
   });

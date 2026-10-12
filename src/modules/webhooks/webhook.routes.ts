@@ -31,11 +31,12 @@ export function webhookRoutes(): Router {
       projectId: project._id,
       secret: randomBytes(32).toString('hex'),
     });
-    res.status(201).json(webhook);
+    res.status(201).json({ ...webhook.toJSON(), secret: webhook.secret });
   });
 
   router.get('/', async (req, res) => {
     const project = await projectFrom(req.params);
+    if (!canManageProject(currentUser(req), project)) throw new ForbiddenError();
     res.json({ data: await WebhookModel.find({ projectId: project._id }).sort({ _id: 1 }) });
   });
 
