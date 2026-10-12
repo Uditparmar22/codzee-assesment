@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { paginationQuery } from '../../lib/pagination.js';
 import { objectId } from '../../lib/validation.js';
 
 export const TASK_STATUSES = ['todo', 'in_progress', 'done'] as const;
@@ -28,10 +29,17 @@ export const updateTaskSchema = z
   .partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required' });
 
-export const listTasksQuerySchema = z.object({
+export const TASK_SORTS = ['createdAt', 'dueDate'] as const;
+
+export const listTasksQuerySchema = paginationQuery.extend({
   status: z.enum(TASK_STATUSES).optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   assigneeId: objectId.optional(),
+  /** Case-insensitive match on the task title. */
+  q: z.string().trim().min(1).max(100).optional(),
+  sort: z.enum(TASK_SORTS).default('createdAt'),
+  /** `include=assignee` embeds the assignee's id, name and email in each task. */
+  include: z.literal('assignee').optional(),
 });
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];

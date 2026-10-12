@@ -6,6 +6,7 @@ import { canEditTask, canManageProject } from '../auth/policies.js';
 import { ProjectModel, type ProjectDocument } from '../projects/project.model.js';
 import { UserModel } from '../users/user.model.js';
 import { TaskModel, type TaskDocument } from './task.model.js';
+import { listProjectTasks } from './task.query.js';
 import { createTaskSchema, listTasksQuerySchema, updateTaskSchema } from './task.schemas.js';
 
 async function assertAssigneeExists(assigneeId: string | null | undefined): Promise<void> {
@@ -38,7 +39,7 @@ export function projectTaskRoutes(): Router {
   router.get('/', async (req, res) => {
     const project = await findProjectOrThrow(projectIdFrom(req.params));
     const query = parse(listTasksQuerySchema, req.query);
-    res.json({ data: await TaskModel.find({ projectId: project._id, ...query }).sort({ _id: 1 }) });
+    res.json(await listProjectTasks(project.id, query));
   });
 
   router.post('/', async (req, res) => {
