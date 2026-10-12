@@ -30,8 +30,8 @@ npm run dev        # http://localhost:3000, indexes are synced on startup
 | `PORT`          | `3000`               | HTTP port                                        |
 | `MONGODB_URI`   | `mongodb://127.0.0.1:27017/task-tracker` | MongoDB connection string |
 | `LOG_LEVEL`     | `info`               | `debug` \| `info` \| `warn` \| `error` \| `silent` |
-| `NODE_ENV`      | `development`        | `development` \| `test` \| `production`          |
-| `JWT_SECRET`    | `dev-secret-change-me` | HMAC secret used to sign access tokens         |
+| `NODE_ENV`      | `production`         | `development` \| `test` \| `production`. Unset is treated as production; `npm run dev` sets `development` |
+| `JWT_SECRET`    | dev fallback outside production | HMAC secret for access tokens. **Required in production** (min. 32 chars); the server refuses to start without it |
 | `JWT_EXPIRES_IN_SECONDS` | `3600`      | Access token lifetime                            |
 
 ## API
