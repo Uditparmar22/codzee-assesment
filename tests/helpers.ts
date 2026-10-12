@@ -2,10 +2,58 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { createTokenService } from '../src/modules/auth/tokens.js';
 import { UserModel } from '../src/modules/users/user.model.js';
+import { createWebhookDispatcher } from '../src/modules/webhooks/webhook.dispatcher.js';
+import { createLogger } from '../src/lib/logger.js';
+
+export interface RecordedWebhookCall {
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+  redirect: RequestInit['redirect'];
+  hasTimeout: boolean;
+}
+
+/** Outgoing webhook requests captured by the fake fetch, and how it should respond. */
+export const webhookServer = {
+  calls: [] as RecordedWebhookCall[],
+  respond: (_call: RecordedWebhookCall): Response | Promise<Response> => new Response(null, { status: 200 }),
+  reset() {
+    this.calls = [];
+    this.respond = () => new Response(null, { status: 200 });
+  },
+};
+
+const fakeFetch: typeof fetch = async (input, init) => {
+  const call = {
+    url: String(input),
+    headers: Object.fromEntries(new Headers(init?.headers).entries()),
+    body: String(init?.body),
+    redirect: init?.redirect,
+    hasTimeout: init?.signal instanceof AbortSignal,
+  };
+  webhookServer.calls.push(call);
+  return webhookServer.respond(call);
+};
 
 export const TEST_SECRET = 'test-secret';
 export const tokens = createTokenService(TEST_SECRET, 3600);
-export const api = request(createApp({ tokens }));
+/** Every test hostname resolves to a public documentation address unless a test overrides it. */
+export const dns = {
+  lookup: async (_hostname: string): Promise<string[]> => ['93.184.216.34'],
+  reset() {
+    this.lookup = async () => ['93.184.216.34'];
+  },
+};
+
+export const webhooks = createWebhookDispatcher({
+  logger: createLogger('silent'),
+  fetch: fakeFetch,
+  lookup: (hostname) => dns.lookup(hostname),
+  retryDelaysMs: [0, 0],
+});
+
+export { fakeFetch };
+export const api = request(createApp({ tokens, webhooks }));
 
 /** A well-formed ObjectId that will never match a document. */
 export const MISSING_ID = '000000000000000000000000';

@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { connectDatabase, disconnectDatabase } from './db/connection.js';
 import { createLogger } from './lib/logger.js';
 import { createTokenService } from './modules/auth/tokens.js';
+import { createWebhookDispatcher } from './modules/webhooks/webhook.dispatcher.js';
 
 const config = loadConfig();
 const logger = createLogger(config.LOG_LEVEL);
@@ -12,13 +13,16 @@ logger.info('Connected to MongoDB');
 
 const tokens = createTokenService(config.JWT_SECRET, config.JWT_EXPIRES_IN_SECONDS);
 
-const server = createApp({ tokens, logger }).listen(config.PORT, () => {
+const webhooks = createWebhookDispatcher({ logger });
+
+const server = createApp({ tokens, webhooks, logger }).listen(config.PORT, () => {
   logger.info('Server listening', { port: config.PORT, env: config.NODE_ENV });
 });
 
 function shutdown(signal: string): void {
   logger.info('Shutting down', { signal });
   server.close(async () => {
+    await webhooks.shutdown();
     await disconnectDatabase();
     process.exit(0);
   });

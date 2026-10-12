@@ -7,6 +7,7 @@ import { ProjectModel, type ProjectDocument } from '../projects/project.model.js
 import { UserModel } from '../users/user.model.js';
 import { TaskModel, type TaskDocument } from './task.model.js';
 import { listProjectTasks } from './task.query.js';
+import type { WebhookDispatcher } from '../webhooks/webhook.dispatcher.js';
 import { createTaskSchema, listTasksQuerySchema, updateTaskSchema } from './task.schemas.js';
 
 async function assertAssigneeExists(assigneeId: string | null | undefined): Promise<void> {
@@ -30,7 +31,11 @@ async function findTaskOrThrow(id: string): Promise<TaskDocument> {
 }
 
 /** Routes nested under a project: /projects/:projectId/tasks */
-export function projectTaskRoutes(): Router {
+interface Deps {
+  webhooks: WebhookDispatcher;
+}
+
+export function projectTaskRoutes({ webhooks }: Deps): Router {
   const router = Router({ mergeParams: true });
 
   const projectIdFrom = (params: unknown) =>
@@ -48,14 +53,16 @@ export function projectTaskRoutes(): Router {
 
     const input = parse(createTaskSchema, req.body);
     await assertAssigneeExists(input.assigneeId);
-    res.status(201).json(await TaskModel.create({ ...input, projectId: project._id }));
+    const task = await TaskModel.create({ ...input, projectId: project._id });
+    webhooks.emit(project.id, 'task.created', task.toJSON());
+    res.status(201).json(task);
   });
 
   return router;
 }
 
 /** Routes addressing a task directly: /tasks/:id */
-export function taskRoutes(): Router {
+export function taskRoutes({ webhooks }: Deps): Router {
   const router = Router();
 
   router.get('/:id', async (req, res) => {
@@ -71,7 +78,9 @@ export function taskRoutes(): Router {
 
     await assertAssigneeExists(input.assigneeId);
     task.set(input);
-    res.json(await task.save());
+    await task.save();
+    webhooks.emit(project.id, 'task.updated', task.toJSON());
+    res.json(task);
   });
 
   router.delete('/:id', async (req, res) => {
@@ -80,6 +89,7 @@ export function taskRoutes(): Router {
     if (!canManageProject(currentUser(req), project)) throw new ForbiddenError();
 
     await task.deleteOne();
+    webhooks.emit(project.id, 'task.deleted', { id: task.id, projectId: project.id });
     res.status(204).end();
   });
 
