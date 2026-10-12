@@ -75,6 +75,8 @@ describe('webhooks API', () => {
         'https://[::1]/hook',
         'https://[::ffff:10.0.0.1]/hook',
         'https://[fd00::1]/hook',
+        'https://localhost./hook',
+        'https://metadata.google.internal./computeMetadata/v1/',
       ]) {
         const res = await api.post(base).send({ url });
         expect(res.status, url).toBe(400);
@@ -227,7 +229,9 @@ describe('webhooks API', () => {
       await api.post(`/projects/${projectId}/tasks`).send({ title: 'Redirected' });
       await webhooks.idle();
 
-      expect(webhookServer.calls.every((c) => c.url === webhook.url)).toBe(true);
+      // The fake receiver can't follow redirects itself, so assert what the dispatcher asked fetch to do.
+      expect(webhookServer.calls.every((c) => c.url === webhook.url && c.redirect === 'manual')).toBe(true);
+      expect(webhookServer.calls.every((c) => c.hasTimeout)).toBe(true);
       const [delivery] = await WebhookDeliveryModel.find({ webhookId: webhook.id }).lean();
       expect(delivery).toMatchObject({ status: 'failed', lastStatusCode: 302 });
     });
@@ -299,6 +303,41 @@ describe('webhooks API', () => {
       expect(Date.now() - started).toBeLessThan(5_000);
       const [delivery] = await WebhookDeliveryModel.find({ webhookId: webhook.id }).lean();
       expect(delivery).toMatchObject({ status: 'failed', attempts: 1, lastError: 'Server shut down before the next retry' });
+    });
+
+    it('applies the timeout to the DNS check too', async () => {
+      const webhook = await register();
+      const dispatcher = createWebhookDispatcher({
+        logger: createLogger('silent'),
+        fetch: fakeFetch,
+        lookup: () => new Promise<string[]>(() => {}),
+        retryDelaysMs: [],
+        requestTimeoutMs: 50,
+      });
+
+      await dispatcher.emit(projectId, 'task.created', {});
+      await dispatcher.idle();
+
+      expect(webhookServer.calls).toHaveLength(0);
+      const [delivery] = await WebhookDeliveryModel.find({ webhookId: webhook.id }).lean();
+      expect(delivery).toMatchObject({ status: 'failed', lastError: expect.stringMatching(/timeout|aborted/i) });
+    });
+
+    it('marks a delivery failed if it crashes part-way', async () => {
+      const webhook = await register();
+      webhookServer.respond = () => new Response(null, { status: 200 });
+      // Fail only the save that records success, so the delivery crashes after being created.
+      const save = WebhookDeliveryModel.prototype.save;
+      vi.spyOn(WebhookDeliveryModel.prototype, 'save').mockImplementation(function (this: InstanceType<typeof WebhookDeliveryModel>, ...args) {
+        if (this.status === 'succeeded') return Promise.reject(new Error('write conflict'));
+        return save.apply(this, args);
+      });
+
+      await webhooks.emit(projectId, 'task.created', {});
+      await webhooks.idle();
+
+      const [delivery] = await WebhookDeliveryModel.find({ webhookId: webhook.id }).lean();
+      expect(delivery).toMatchObject({ status: 'failed', lastError: 'Delivery aborted: write conflict' });
     });
   });
 });

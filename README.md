@@ -126,6 +126,8 @@ Non-2xx responses (including redirects, which are not followed), network errors 
 
 Webhook URLs must use `https` and may not point to private, loopback, link-local or other internal addresses. This is checked when the webhook is registered and again, after DNS resolution, before every delivery.
 
+Known limitation: the delivery-time check resolves the hostname separately from the HTTP request, so a hostile DNS server answering differently between the two lookups (DNS rebinding with TTL 0) could still reach an internal address. Pinning the validated address in the HTTP agent is planned.
+
 ### Pagination
 
 List endpoints use cursor pagination. Pass `limit` (default 20, max 100) and, for the next page, the `cursor` returned by the previous one:
@@ -187,6 +189,7 @@ tests/                 API tests against mongodb-memory-server
 ## Roadmap
 
 - Durable webhook queue (deliveries currently run in-process)
+- Pin validated webhook addresses in the HTTP agent (closes the DNS rebinding window)
 - Transactions for multi-document writes (requires a replica set)
 
 ## License

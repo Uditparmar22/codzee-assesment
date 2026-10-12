@@ -1,7 +1,12 @@
 import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Logger } from '../../lib/logger.js';
-import { WebhookDeliveryModel, WebhookModel, type WebhookDocument } from './webhook.model.js';
+import {
+  WebhookDeliveryModel,
+  WebhookModel,
+  type WebhookDeliveryDocument,
+  type WebhookDocument,
+} from './webhook.model.js';
 import type { WebhookEvent } from './webhook.schemas.js';
 import { assertPublicDestination, defaultLookup, type HostLookup } from './url-safety.js';
 
@@ -37,6 +42,16 @@ export function signPayload(secret: string, body: string): string {
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** Rejects with the signal's reason as soon as it aborts, even if `promise` never settles. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 export function createWebhookDispatcher({
   logger,
   fetch = globalThis.fetch,
@@ -53,19 +68,34 @@ export function createWebhookDispatcher({
   };
 
   async function attemptDelivery(webhook: WebhookDocument, body: string, headers: Record<string, string>) {
-    await assertPublicDestination(webhook.url, lookup);
+    // One deadline for the whole attempt, DNS check included.
+    const signal = AbortSignal.timeout(requestTimeoutMs);
+    await abortable(assertPublicDestination(webhook.url, lookup), signal);
     // Redirects are not followed: a 3xx could point the request at an internal address.
-    return fetch(webhook.url, {
-      method: 'POST',
-      headers,
-      body,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(requestTimeoutMs),
-    });
+    return fetch(webhook.url, { method: 'POST', headers, body, redirect: 'manual', signal });
   }
 
   async function deliver(webhook: WebhookDocument, event: WebhookEvent, data: unknown): Promise<void> {
     const delivery = await WebhookDeliveryModel.create({ webhookId: webhook._id, event });
+    try {
+      await runAttempts(webhook, delivery, event, data);
+    } catch (err) {
+      // Best effort: don't leave the record `pending` forever. If the webhook (and so its
+      // deliveries) was deleted mid-retry, this matches nothing, which is fine.
+      await WebhookDeliveryModel.updateOne(
+        { _id: delivery._id },
+        { status: 'failed', lastError: `Delivery aborted: ${errorMessage(err)}` },
+      ).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  async function runAttempts(
+    webhook: WebhookDocument,
+    delivery: WebhookDeliveryDocument,
+    event: WebhookEvent,
+    data: unknown,
+  ): Promise<void> {
     const payload = { id: delivery.id, event, createdAt: delivery.createdAt.toISOString(), data };
 
     for (let attempt = 1; attempt <= retryDelaysMs.length + 1; attempt++) {

@@ -37,13 +37,14 @@ export function isBlockedAddress(address: string): boolean {
   return blocked.check(address, family === 4 ? 'ipv4' : 'ipv6');
 }
 
-const stripBrackets = (hostname: string) => hostname.replace(/^\[|\]$/g, '');
+/** Hostname without IPv6 brackets or the trailing root dot (`localhost.` is `localhost`). */
+const normaliseHost = (hostname: string) => hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
 
 /** Cheap registration-time check: rejects internal hostnames and blocked IP literals without DNS. */
 export function isAllowedWebhookUrl(raw: string): boolean {
   // Zod runs refinements even after the URL check fails, so the input may not parse.
   if (!URL.canParse(raw)) return false;
-  const host = stripBrackets(new URL(raw).hostname).toLowerCase();
+  const host = normaliseHost(new URL(raw).hostname);
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) return false;
   return isIP(host) === 0 || !isBlockedAddress(host);
 }
@@ -55,12 +56,14 @@ export const defaultLookup: HostLookup = async (hostname) =>
 
 /**
  * Delivery-time check: resolves the host and refuses if any address is internal, so a public
- * hostname that later points at an internal address (DNS rebinding) is still blocked. A small
- * window remains between this lookup and fetch's own lookup; closing it fully needs a custom
- * dispatcher that pins the resolved address.
+ * hostname that later points at an internal address (DNS rebinding) is mostly blocked.
+ *
+ * Known gap: fetch resolves the host again, so a hostile DNS server with TTL 0 can still answer
+ * differently between the two lookups. Closing it needs an undici Agent whose `connect.lookup`
+ * validates and pins the address; tracked as a follow-up.
  */
 export async function assertPublicDestination(raw: string, lookup: HostLookup): Promise<void> {
-  const host = stripBrackets(new URL(raw).hostname);
+  const host = normaliseHost(new URL(raw).hostname);
   const addresses = isIP(host) ? [host] : await lookup(host);
   if (addresses.length === 0 || addresses.some(isBlockedAddress)) {
     throw new Error(`Destination ${host} resolves to a blocked address`);

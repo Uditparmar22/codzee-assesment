@@ -37,4 +37,5 @@ const deliverySchema = new Schema(
 deliverySchema.index({ webhookId: 1, _id: -1 });
 
 export type WebhookDelivery = InferSchemaType<typeof deliverySchema>;
+export type WebhookDeliveryDocument = HydratedDocument<WebhookDelivery>;
 export const WebhookDeliveryModel = model('WebhookDelivery', deliverySchema);

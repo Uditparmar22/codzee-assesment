@@ -9,6 +9,8 @@ export interface RecordedWebhookCall {
   url: string;
   headers: Record<string, string>;
   body: string;
+  redirect: RequestInit['redirect'];
+  hasTimeout: boolean;
 }
 
 /** Outgoing webhook requests captured by the fake fetch, and how it should respond. */
@@ -26,6 +28,8 @@ const fakeFetch: typeof fetch = async (input, init) => {
     url: String(input),
     headers: Object.fromEntries(new Headers(init?.headers).entries()),
     body: String(init?.body),
+    redirect: init?.redirect,
+    hasTimeout: init?.signal instanceof AbortSignal,
   };
   webhookServer.calls.push(call);
   return webhookServer.respond(call);
