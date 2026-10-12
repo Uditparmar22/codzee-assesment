@@ -74,8 +74,11 @@ export function taskRoutes(): Router {
   });
 
   router.delete('/:id', async (req, res) => {
-    const id = parseId(req.params.id);
-    if (!(await TaskModel.findByIdAndDelete(id))) throw new NotFoundError('Task', id);
+    const task = await findTaskOrThrow(parseId(req.params.id));
+    const project = await findProjectOrThrow(task.projectId.toString());
+    if (!canManageProject(currentUser(req), project)) throw new ForbiddenError();
+
+    await task.deleteOne();
     res.status(204).end();
   });
 

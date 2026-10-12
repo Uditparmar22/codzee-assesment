@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { MISSING_ID, as, api as anonymous, createProject, createUser, type TestUser } from './helpers.js';
+import { MISSING_ID, as, api as anonymous, createAdmin, createProject, createUser, type TestUser } from './helpers.js';
 
 describe('tasks API', () => {
   let owner: TestUser;
@@ -97,6 +97,18 @@ describe('tasks API', () => {
     it('only lets the project owner create tasks', async () => {
       const stranger = await createUser('Stranger');
       await as(stranger).post(`/projects/${projectId}/tasks`).send({ title: 'Nope' }).expect(403);
+    });
+
+    it('only lets the project owner or an admin delete a task', async () => {
+      const assignee = await createUser('Assignee');
+      const stranger = await createUser('Stranger');
+      const task = await api.post(`/projects/${projectId}/tasks`).send({ title: 'Keep me', assigneeId: assignee.id });
+
+      await as(stranger).delete(`/tasks/${task.body.id}`).expect(403);
+      await as(assignee).delete(`/tasks/${task.body.id}`).expect(403);
+      await api.get(`/tasks/${task.body.id}`).expect(200);
+
+      await as(await createAdmin()).delete(`/tasks/${task.body.id}`).expect(204);
     });
 
     it('lets the assignee update their task but not a stranger', async () => {

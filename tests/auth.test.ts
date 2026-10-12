@@ -33,6 +33,15 @@ describe('auth API', () => {
     expect(res.status).toBe(409);
   });
 
+  it('ignores a client-supplied role: self-registration always creates a member', async () => {
+    const res = await api
+      .post('/auth/register')
+      .send({ email: 'mallory@example.com', name: 'Mallory', password: TEST_PASSWORD, role: 'admin' });
+    expect(res.status).toBe(201);
+    expect(res.body.user.role).toBe('member');
+    expect((await UserModel.findById(res.body.user.id))?.role).toBe('member');
+  });
+
   it('validates registration input', async () => {
     const res = await api.post('/auth/register').send({ email: 'nope', name: '', password: 'short' });
     expect(res.status).toBe(400);
@@ -48,10 +57,14 @@ describe('auth API', () => {
     await as(res.body).get('/users/me').expect(200);
   });
 
-  it('rejects a wrong password', async () => {
+  it('returns the same error for a wrong password and an unknown email', async () => {
     const user = await createUser();
-    const res = await api.post('/auth/login').send({ email: user.email, password: 'wrong password' });
-    expect(res.status).toBe(401);
+    const wrongPassword = await api.post('/auth/login').send({ email: user.email, password: 'wrong password' });
+    const unknownEmail = await api.post('/auth/login').send({ email: 'nobody@example.com', password: TEST_PASSWORD });
+
+    expect(wrongPassword.status).toBe(401);
+    expect(unknownEmail.status).toBe(401);
+    expect(unknownEmail.body).toEqual(wrongPassword.body);
   });
 
   it('rejects users without a password set', async () => {
